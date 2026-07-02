@@ -5,8 +5,9 @@ pipeline {
         REGISTRY = 'docker.io'
         IMAGE_NAME = "${REGISTRY}/mohamedamine2003/tasklist-backend"
         IMAGE_TAG = "${BUILD_NUMBER}"
-        DOCKER_CREDENTIALS = 'mohamed-amine-dockerhub-password'
-        SONARQUBE_TOKEN = 'mohamed-amine-sonar-token'
+        DOCKER_CREDENTIALS = 'dockerhub-credentials-exam'
+        SONAR_CREDENTIALS_ID = 'projet-exam-backend-secret'
+        SONAR_PROJECT_KEY = 'projet-exam-backend'
     }
 
     triggers {
@@ -30,7 +31,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo ' Installation des dépendances...'
-                sh 'npm install'
+                sh 'npm ci --include=dev'
             }
         }
 
@@ -46,6 +47,14 @@ pipeline {
                 echo ' Exécution des tests unitaires...'
                 sh 'npm run test:coverage'
             }
+            post {
+                always {
+                    junit testResults: 'reports/junit.xml',
+                          skipPublishingChecks: true,
+                          allowEmptyResults: true
+                    archiveArtifacts artifacts: 'coverage/**', allowEmptyArchive: true
+                }
+            }
         }
 
         stage('E2E Tests') {
@@ -58,14 +67,25 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 echo ' Analyse SonarQube...'
-                withSonarQubeEnv('sonarqube') {
+                withCredentials([string(credentialsId: "${SONAR_CREDENTIALS_ID}", variable: 'SONAR_TOKEN')]) {
                     sh '''
                         npx sonarqube-scanner \
-                            -Dsonar.projectKey=juba-tasklist-backend \
+                            -Dsonar.host.url=https://sonarqube.cicd.kits.ext.educentre.fr \
+                            -Dsonar.token=${SONAR_TOKEN} \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                             -Dsonar.sources=src \
                             -Dsonar.coverage.exclusions=**/__tests__/** \
                             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info,coverage-e2e/lcov.info
                     '''
+                }
+            }
+        }
+
+        stage('SonarQube Quality Gate') {
+            steps {
+                echo ' Vérification du Quality Gate...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
                 }
             }
         }
@@ -82,11 +102,51 @@ pipeline {
             }
         }
 
+        stage('Scan with Trivy') {
+            steps {
+                echo ' Analyse de sécurité Trivy...'
+                sh '''
+                    trivy image \
+                        --format json \
+                        --output trivy-report.json \
+                        --severity HIGH,CRITICAL \
+                        ${IMAGE_NAME}:${IMAGE_TAG} || true
+
+                    trivy image \
+                        --format table \
+                        --severity HIGH,CRITICAL \
+                        ${IMAGE_NAME}:${IMAGE_TAG} || true
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Generate SBOM') {
+            steps {
+                echo ' Génération du SBOM...'
+                sh '''
+                    trivy image \
+                        --format spdx-json \
+                        --output sbom-spdx.json \
+                        ${IMAGE_NAME}:${IMAGE_TAG}
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'sbom-spdx.json', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Push to DockerHub') {
             steps {
                 echo ' Push vers DockerHub...'
-                withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS}", 
-                                                   usernameVariable: 'DOCKER_USER', 
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS}",
+                                                   usernameVariable: 'DOCKER_USER',
                                                    passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin

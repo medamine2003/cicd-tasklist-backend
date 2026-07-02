@@ -3,9 +3,9 @@ pipeline {
 
     environment {
         REGISTRY = 'docker.io'
-        IMAGE_NAME = "${REGISTRY}/mohamedamine2003/tasklist-backend"
+        IMAGE_NAME = "${REGISTRY}/xx/tasklist-backend"
         IMAGE_TAG = "${BUILD_NUMBER}"
-        DOCKER_CREDENTIALS = 'mohamed-amine-dockerhub-password'
+        DOCKER_CREDENTIALS = 'xx-dockerhub-password'
         SONAR_CREDENTIALS_ID = 'projet-exam-backend-secret'
         SONAR_PROJECT_KEY = 'projet-exam-backend'
     }
